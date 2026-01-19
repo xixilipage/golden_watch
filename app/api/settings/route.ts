@@ -1,20 +1,20 @@
 import { NextResponse } from 'next/server';
-import { getScraperUrl, updateScraperUrl, getCronConfig, saveCronConfig } from '@/lib/db';
+import { getScraperUrls, updateScraperUrls, getCronConfig, saveCronConfig } from '@/lib/db';
 import { startCron, stopCron } from '@/lib/cron';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const [scrapeUrl, cronConfig] = await Promise.all([
-      getScraperUrl(),
+    const [scrapeUrls, cronConfig] = await Promise.all([
+      getScraperUrls(),
       getCronConfig()
     ]);
 
     return NextResponse.json({
       success: true,
       data: {
-        scrapeUrl,
+        scrapeUrls,
         cron: cronConfig
       }
     });
@@ -29,18 +29,18 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { scrapeUrl, cron } = body;
+    const { scrapeUrls, cron } = body;
 
     // Validate inputs
-    if (typeof scrapeUrl !== 'string') {
-      return NextResponse.json({ success: false, error: 'Invalid scrapeUrl' }, { status: 400 });
+    if (!scrapeUrls || typeof scrapeUrls.ccb !== 'string' || typeof scrapeUrls.cmb !== 'string') {
+      return NextResponse.json({ success: false, error: 'Invalid scrapeUrls' }, { status: 400 });
     }
     if (cron && (typeof cron.enabled !== 'boolean' || (cron.expression && typeof cron.expression !== 'string'))) {
       return NextResponse.json({ success: false, error: 'Invalid cron config' }, { status: 400 });
     }
 
     // Save settings
-    await updateScraperUrl(scrapeUrl);
+    await updateScraperUrls(scrapeUrls);
     
     if (cron) {
       await saveCronConfig(cron.enabled, cron.expression);

@@ -51,6 +51,7 @@ interface GoldHistoryItem {
   price: number;
   unit: string;
   timestamp: string;
+  source?: string;
 }
 
 interface GoldHistoryResponse {
@@ -61,8 +62,8 @@ interface GoldHistoryResponse {
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export default function GoldDemoPage() {
-  // Initialize with '7' but try to read from localStorage on mount
   const [selectedRange, setSelectedRange] = useState<string>('7');
+  const [selectedSource, setSelectedSource] = useState<'ccb' | 'cmb'>('ccb');
 
   useEffect(() => {
     const savedRange = localStorage.getItem('gold_price_range');
@@ -71,53 +72,53 @@ export default function GoldDemoPage() {
     }
   }, []);
 
+  useEffect(() => {
+    const savedSource = localStorage.getItem('gold_source');
+    if (savedSource === 'ccb' || savedSource === 'cmb') {
+      setSelectedSource(savedSource);
+    }
+  }, []);
+
   const handleRangeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     if (!value) return;
 
-    // 如果选择了新的范围，更新状态并记忆
     if (value !== selectedRange) {
       setSelectedRange(value);
       localStorage.setItem('gold_price_range', value);
       return;
     }
 
-    // 如果再次选择同一个范围，则当作一次“刷新”操作
-    // 触发价格和历史数据的重新获取，并带有loading动画
     handleRefresh();
   };
   
-  // Settings State
   const {isOpen, onOpen, onOpenChange} = useDisclosure();
-  const [scrapeUrl, setScrapeUrl] = useState('');
+  const [scrapeUrls, setScrapeUrls] = useState({ ccb: '', cmb: '' });
   const [cronExpression, setCronExpression] = useState('');
   const [cronEnabled, setCronEnabled] = useState(false);
   const [isSettingsLoading, setIsSettingsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Fetch Current Price
   const { 
     data: priceData, 
     mutate: mutatePrice, 
     isValidating: isPriceValidating 
-  } = useSWR<GoldPriceResponse>('/api/gold-price', fetcher, {
-    refreshInterval: 0, // Manual refresh only
+  } = useSWR<GoldPriceResponse>(`/api/gold-price?source=${selectedSource}`, fetcher, {
+    refreshInterval: 0,
     revalidateOnFocus: false,
   });
 
-  // Fetch History
   const { 
     data: historyData, 
     isLoading: isHistoryLoading,
     isValidating: isHistoryValidating,
     mutate: mutateHistory
-  } = useSWR<GoldHistoryResponse>(`/api/gold-history?days=${selectedRange}`, fetcher);
+  } = useSWR<GoldHistoryResponse>(`/api/gold-history?days=${selectedRange}&source=${selectedSource}`, fetcher);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    // Minimum loading time to ensure animation visibility
     const minLoading = new Promise(resolve => setTimeout(resolve, 800));
     await Promise.all([
       mutatePrice(),
@@ -127,36 +128,39 @@ export default function GoldDemoPage() {
     setIsRefreshing(false);
   };
 
-  // Pull to refresh logic
+  const handleSourceChange = (source: 'ccb' | 'cmb') => {
+    if (source !== selectedSource) {
+      setSelectedSource(source);
+      localStorage.setItem('gold_source', source);
+      return;
+    }
+    handleRefresh();
+  };
+
   const [pullProgress, setPullProgress] = useState(0);
   const [isPulling, setIsPulling] = useState(false);
   
-  // Use refs for gesture tracking to avoid effect re-runs
   const startYRef = useRef(0);
   const isPullingRef = useRef(false);
   const pullProgressRef = useRef(0);
   
-  // Keep latest handleRefresh in a ref to call it from event listeners without re-binding
   const handleRefreshRef = useRef(handleRefresh);
   useEffect(() => {
     handleRefreshRef.current = handleRefresh;
   }, [handleRefresh]);
 
   useEffect(() => {
-    const DEADZONE_THRESHOLD = 80; // Must drag 80px before activation (increased from 50)
+    const DEADZONE_THRESHOLD = 80;
 
     const handleTouchStart = (e: TouchEvent) => {
-      // Only enable pull to refresh when strictly at the top of the page
       if (window.scrollY === 0) {
         startYRef.current = e.touches[0].clientY;
-        // Reset state
         isPullingRef.current = false;
         pullProgressRef.current = 0;
       }
     };
 
     const handleTouchMove = (e: TouchEvent) => {
-      // If we are not at top, ignore
       if (window.scrollY > 0) {
         if (isPullingRef.current) {
             isPullingRef.current = false;
@@ -169,23 +173,16 @@ export default function GoldDemoPage() {
       const currentY = e.touches[0].clientY;
       const diff = currentY - startYRef.current;
 
-      // Only start pulling if:
-      // 1. We are dragging down (diff > DEADZONE_THRESHOLD)
-      // 2. We haven't started pulling yet
       if (diff > DEADZONE_THRESHOLD && !isPullingRef.current) {
          isPullingRef.current = true;
          setIsPulling(true);
       }
 
       if (isPullingRef.current && diff > 0) {
-        // Prevent default browser refresh behavior
         if (e.cancelable) {
            e.preventDefault(); 
         }
         
-        // Add resistance
-        // (diff - DEADZONE_THRESHOLD) is the effective drag distance
-        // 0.4 is the resistance factor
         const progress = Math.min((diff - DEADZONE_THRESHOLD) * 0.4, 200); 
         pullProgressRef.current = progress;
         setPullProgress(progress);
@@ -195,18 +192,16 @@ export default function GoldDemoPage() {
     const handleTouchEnd = async () => {
       if (!isPullingRef.current) return;
 
-      if (pullProgressRef.current > 80) { // Trigger refresh if pulled enough (increased from 60)
+      if (pullProgressRef.current > 80) {
         await handleRefreshRef.current();
       }
       
-      // Reset
       isPullingRef.current = false;
       pullProgressRef.current = 0;
       setIsPulling(false);
       setPullProgress(0);
     };
 
-    // Add passive: false to allow preventDefault
     window.addEventListener('touchstart', handleTouchStart, { passive: true });
     window.addEventListener('touchmove', handleTouchMove, { passive: false });
     window.addEventListener('touchend', handleTouchEnd);
@@ -216,7 +211,7 @@ export default function GoldDemoPage() {
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleTouchEnd);
     };
-  }, []); // No dependencies = stable listeners
+  }, []);
 
   const chartData = useMemo(() => {
     if (!historyData?.data) return [];
@@ -254,7 +249,10 @@ export default function GoldDemoPage() {
         .then(res => res.json())
         .then(data => {
           if (data.success) {
-            setScrapeUrl(data.data.scrapeUrl || '');
+            setScrapeUrls({
+              ccb: data.data.scrapeUrls?.ccb || '',
+              cmb: data.data.scrapeUrls?.cmb || ''
+            });
             setCronExpression(data.data.cron?.expression || '0 * * * *');
             setCronEnabled(data.data.cron?.enabled || false);
           }
@@ -271,7 +269,7 @@ export default function GoldDemoPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          scrapeUrl,
+          scrapeUrls,
           cron: {
             enabled: cronEnabled,
             expression: cronExpression
@@ -330,23 +328,39 @@ export default function GoldDemoPage() {
         
         {/* Header Section */}
         <div className="flex justify-between items-center px-1">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                <span className="bg-yellow-100 text-yellow-600 p-2 rounded-lg">
-                  <DollarSign className="w-6 h-6" />
-                </span>
-                实时金价追踪
-              </h1>
+          <h1 className="text-3xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
+            <span className="bg-yellow-100 text-yellow-600 p-2 rounded-lg">
+              <DollarSign className="w-6 h-6" />
+            </span>
+            实时金价
+          </h1>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-full p-1">
               <Button
-                isIconOnly
-                variant="light"
-                onPress={onOpen}
-                className="text-gray-500 hover:text-gray-700"
+                size="sm"
+                variant={selectedSource === 'ccb' ? 'solid' : 'light'}
+                className={selectedSource === 'ccb' ? 'text-white bg-yellow-500' : 'text-gray-600'}
+                onPress={() => handleSourceChange('ccb')}
               >
-                <Settings size={20} />
+                建行
+              </Button>
+              <Button
+                size="sm"
+                variant={selectedSource === 'cmb' ? 'solid' : 'light'}
+                className={selectedSource === 'cmb' ? 'text-white bg-yellow-500' : 'text-gray-600'}
+                onPress={() => handleSourceChange('cmb')}
+              >
+                招行
               </Button>
             </div>
+            <Button
+              isIconOnly
+              variant="light"
+              onPress={onOpen}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <Settings size={20} />
+            </Button>
           </div>
         </div>
 
@@ -420,7 +434,7 @@ export default function GoldDemoPage() {
               </CardHeader>
               <CardBody className="py-3 px-3 md:py-4 md:px-4">
                 {stats && !isRefreshing && !isHistoryValidating ? (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-2 gap-2 md:gap-4">
                     <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg flex flex-col items-center justify-center">
                       <p className="text-xs text-gray-500 mb-1">最高价</p>
                       <p className="text-lg font-semibold text-green-600 leading-tight">{stats.max.toFixed(2)}</p>
@@ -544,13 +558,22 @@ export default function GoldDemoPage() {
                   <div className="space-y-4 pb-12">
                     <div>
                       <p className="text-small font-bold text-gray-500 mb-2">爬虫设置</p>
-                      <Input
-                        label="目标 URL"
-                        placeholder="输入金价页面地址"
-                        value={scrapeUrl}
-                        onValueChange={setScrapeUrl}
-                        variant="bordered"
-                      />
+                      <div className="space-y-3">
+                        <Input
+                          label="建行 URL"
+                          placeholder="输入建行金价页面地址"
+                          value={scrapeUrls.ccb}
+                          onValueChange={(value) => setScrapeUrls((prev) => ({ ...prev, ccb: value }))}
+                          variant="bordered"
+                        />
+                        <Input
+                          label="招行 URL"
+                          placeholder="输入招行金条页面地址"
+                          value={scrapeUrls.cmb}
+                          onValueChange={(value) => setScrapeUrls((prev) => ({ ...prev, cmb: value }))}
+                          variant="bordered"
+                        />
+                      </div>
                     </div>
                     <div className="pt-2">
                       <p className="text-small font-bold text-gray-500 mb-2">定时任务</p>

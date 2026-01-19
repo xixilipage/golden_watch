@@ -6,6 +6,11 @@ export const metadata: Metadata = {
   title: "建行实物黄金价格追踪",
   description: "Real-time Gold Price Monitor",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+    apple: "/icon-192.png",
+  },
 };
 
 export const viewport: Viewport = {

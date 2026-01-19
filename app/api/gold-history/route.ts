@@ -7,6 +7,8 @@ export const runtime = 'nodejs';
 export async function GET(request: NextRequest) {
   try {
     const daysParam = request.nextUrl.searchParams.get('days');
+    const sourceParam = request.nextUrl.searchParams.get('source');
+    const source = sourceParam === 'cmb' ? 'cmb' : 'ccb';
     let days: number | null = null;
 
     if (daysParam && daysParam !== 'all') {
@@ -16,7 +18,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const history = await getGoldHistoryByDays(days);
+    const history = await getGoldHistoryByDays(days, source);
 
     return NextResponse.json({
       success: true,
