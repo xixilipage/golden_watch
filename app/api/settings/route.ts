@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getScraperUrls, updateScraperUrls, getCronConfig, saveCronConfig } from '@/lib/db';
-import { startCron, stopCron } from '@/lib/cron';
+import { ensureCronStartedFromDb, startCron, stopCron } from '@/lib/cron';
 
 export const dynamic = 'force-dynamic';
+
+void ensureCronStartedFromDb();
 
 export async function GET() {
   try {

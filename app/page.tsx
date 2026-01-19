@@ -538,6 +538,10 @@ export default function GoldDemoPage() {
         </div>
       </div>
 
+      <div className="mt-4 text-center text-xs text-gray-400 md:hidden">
+        数据来源：中国建设银行、中国招商银行 by Edwinsssz2
+      </div>
+
       {/* Settings Modal */}
       <Modal 
         isOpen={isOpen} 

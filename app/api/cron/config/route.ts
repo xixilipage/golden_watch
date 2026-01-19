@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getCronStatus, startCron, stopCron } from '@/lib/cron';
+import { ensureCronStartedFromDb, getCronStatus, startCron, stopCron } from '@/lib/cron';
 import { getCronConfig, saveCronConfig } from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+void ensureCronStartedFromDb();
 
 export async function GET() {
   try {

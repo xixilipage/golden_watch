@@ -1,9 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getLatestGoldPrice } from '@/lib/db';
+import { ensureCronStartedFromDb } from '@/lib/cron';
 import { scrapeAndSave } from '@/lib/scraper';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+void ensureCronStartedFromDb();
+
+const formatPrice = (price: number) =>
+  Number.isFinite(price) ? price.toFixed(2) : '';
 
 export async function GET(request: NextRequest) {
     const sourceParam = request.nextUrl.searchParams.get('source');
@@ -22,9 +28,9 @@ export async function GET(request: NextRequest) {
                 return NextResponse.json({
                     success: true,
                     data: {
-                        price: latest.price.toString(),
+                        price: formatPrice(latest.price),
                         unit: latest.unit,
-                        fullText: `${latest.price}${latest.unit}`
+                        fullText: `${formatPrice(latest.price)}${latest.unit}`
                     },
                     timestamp: latest.timestamp
                 });
@@ -35,7 +41,10 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({
             success: true,
             source: 'scraper',
-            data: result.data,
+            data: {
+                ...result.data,
+                price: formatPrice(result.data.price),
+            },
             timestamp: result.timestamp
         });
 
@@ -48,9 +57,9 @@ export async function GET(request: NextRequest) {
                 success: true,
                 source: 'cache',
                 data: {
-                    price: latest.price.toString(),
+                    price: formatPrice(latest.price),
                     unit: latest.unit,
-                    fullText: `${latest.price}${latest.unit}`
+                    fullText: `${formatPrice(latest.price)}${latest.unit}`
                 },
                 timestamp: latest.timestamp
             });
