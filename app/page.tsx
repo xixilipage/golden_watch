@@ -30,7 +30,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import { format } from 'date-fns';
-import { RefreshCw, TrendingUp, DollarSign, Settings, Calendar } from 'lucide-react';
+import { RefreshCw, DollarSign, Settings, Calendar } from 'lucide-react';
 
 // --- Types ---
 interface GoldData {
@@ -103,8 +103,7 @@ export default function GoldDemoPage() {
     data: priceData, 
     mutate: mutatePrice, 
     isValidating: isPriceValidating 
-  } = useSWR<GoldPriceResponse>(`/api/gold-price?source=${selectedSource}`, fetcher, {
-    refreshInterval: 0,
+  } = useSWR<GoldPriceResponse>(`/api/gold-price?source=${selectedSource}&cacheOnly=1`, fetcher, {
     revalidateOnFocus: false,
   });
 
@@ -121,7 +120,7 @@ export default function GoldDemoPage() {
     setIsRefreshing(true);
     const minLoading = new Promise(resolve => setTimeout(resolve, 800));
     await Promise.all([
-      mutatePrice(),
+      mutatePrice(fetcher(`/api/gold-price?source=${selectedSource}`), { revalidate: false }),
       mutateHistory(),
       minLoading
     ]);
@@ -150,7 +149,7 @@ export default function GoldDemoPage() {
   }, [handleRefresh]);
 
   useEffect(() => {
-    const DEADZONE_THRESHOLD = 80;
+    const DEADZONE_THRESHOLD = 30;
 
     const handleTouchStart = (e: TouchEvent) => {
       if (window.scrollY === 0) {
@@ -192,7 +191,7 @@ export default function GoldDemoPage() {
     const handleTouchEnd = async () => {
       if (!isPullingRef.current) return;
 
-      if (pullProgressRef.current > 80) {
+      if (pullProgressRef.current > 30) {
         await handleRefreshRef.current();
       }
       
@@ -241,10 +240,18 @@ export default function GoldDemoPage() {
     return { max, min, avg, change, changePercent };
   }, [chartData]);
 
+  const latestHistoryItem = useMemo(() => {
+    if (!chartData.length) return null;
+    return chartData[chartData.length - 1];
+  }, [chartData]);
+
+  const displayPrice = priceData?.data?.price
+    ?? (latestHistoryItem ? latestHistoryItem.price.toFixed(2) : '---');
+  const displayUnit = priceData?.data?.unit ?? latestHistoryItem?.unit ?? '元/克';
+  const displayTimestamp = priceData?.timestamp ?? latestHistoryItem?.timestamp ?? null;
+
   // Fetch settings when modal opens
   useEffect(() => {
-    if (isOpen) {
-      setIsSettingsLoading(true);
       fetch('/api/settings')
         .then(res => res.json())
         .then(data => {
@@ -258,9 +265,7 @@ export default function GoldDemoPage() {
           }
         })
         .catch(err => console.error('Failed to fetch settings:', err))
-        .finally(() => setIsSettingsLoading(false));
-    }
-  }, [isOpen]);
+  }, []);
 
   const handleSaveSettings = async () => {
     setIsSaving(true);
@@ -363,7 +368,6 @@ export default function GoldDemoPage() {
             </Button>
           </div>
         </div>
-
         {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
           
@@ -377,12 +381,12 @@ export default function GoldDemoPage() {
                   <div>
                     <p className="text-yellow-100 font-medium mb-1">当前金价</p>
                     <div className="flex items-baseline gap-2">
-                      <Skeleton isLoaded={!isPriceValidating} className="rounded-lg bg-white/20">
+                      <Skeleton isLoaded={!isPriceValidating && !isHistoryLoading} className="rounded-lg bg-white/20">
                         <h2 className="text-5xl font-bold min-h-[48px] min-w-[150px]">
-                          {priceData?.data?.price || "---"}
+                          {displayPrice}
                         </h2>
                       </Skeleton>
-                      <span className="text-xl opacity-90">{priceData?.data?.unit || "元/克"}</span>
+                      <span className="text-xl opacity-90">{displayUnit}</span>
                     </div>
                   </div>
                   <Button
@@ -396,17 +400,25 @@ export default function GoldDemoPage() {
                     刷新
                   </Button>
                 </div>
-                <div className="mt-6 text-sm text-yellow-100/80 flex justify-between items-end">
-                  <div>
+                <div className="mt-6 text-sm text-yellow-100/80 flex items-end">
+                  <div className="flex-1">
                     <p>最后更新：</p>
-                    <Skeleton isLoaded={!isPriceValidating} className="rounded-md bg-white/20 mt-1">
+                    <Skeleton isLoaded={!isPriceValidating && !isHistoryLoading} className="rounded-md bg-white/20 mt-1">
                       <p className="font-mono min-h-[20px] min-w-[160px]">
-                        {priceData?.timestamp 
-                          ? format(new Date(priceData.timestamp), 'yyyy-MM-dd HH:mm:ss') 
+                        {displayTimestamp 
+                          ? format(new Date(displayTimestamp), 'yyyy-MM-dd HH:mm:ss') 
                           : '获取中...'}
                       </p>
                     </Skeleton>
                   </div>
+                  <a
+                    href={selectedSource === 'ccb' ? scrapeUrls.ccb : scrapeUrls.cmb}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-white/80 underline underline-offset-4 hover:text-white"
+                  >
+                    {selectedSource === 'ccb' ? '建行购金链接' : '招行购金链接'}
+                  </a>
                 </div>
               </CardBody>
             </Card>
@@ -569,6 +581,10 @@ export default function GoldDemoPage() {
                           value={scrapeUrls.ccb}
                           onValueChange={(value) => setScrapeUrls((prev) => ({ ...prev, ccb: value }))}
                           variant="bordered"
+                          classNames={{
+                            inputWrapper: "ring-0 shadow-none focus-within:ring-0 focus-within:ring-offset-0",
+                            input: "outline-none focus:outline-none"
+                          }}
                         />
                         <Input
                           label="招行 URL"
@@ -576,6 +592,10 @@ export default function GoldDemoPage() {
                           value={scrapeUrls.cmb}
                           onValueChange={(value) => setScrapeUrls((prev) => ({ ...prev, cmb: value }))}
                           variant="bordered"
+                          classNames={{
+                            inputWrapper: "ring-0 shadow-none focus-within:ring-0 focus-within:ring-offset-0",
+                            input: "outline-none focus:outline-none"
+                          }}
                         />
                       </div>
                     </div>
@@ -593,6 +613,10 @@ export default function GoldDemoPage() {
                         variant="bordered"
                         description="标准 Cron 语法 (分 时 日 月 周)"
                         isDisabled={!cronEnabled}
+                        classNames={{
+                          inputWrapper: "ring-0 shadow-none focus-within:ring-0 focus-within:ring-offset-0",
+                          input: "outline-none focus:outline-none"
+                        }}
                       />
                     </div>
                   </div>

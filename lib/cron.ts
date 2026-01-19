@@ -32,7 +32,7 @@ export function startCron(expression: string) {
   cronExpression = trimmed;
   task = cron.schedule(trimmed, async () => {
     try {
-      await scrapeAndSave();
+      await Promise.allSettled([scrapeAndSave('ccb'), scrapeAndSave('cmb')]);
     } catch (e) {}
   });
 }
@@ -49,7 +49,7 @@ export async function ensureCronStartedFromDb() {
         startCron(dbConfig.expression);
       }
       try {
-        await scrapeAndSave();
+        await Promise.allSettled([scrapeAndSave('ccb'), scrapeAndSave('cmb')]);
       } catch (e) {}
     }
   } finally {

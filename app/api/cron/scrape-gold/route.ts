@@ -19,12 +19,15 @@ export async function GET(request: Request) {
 
     try {
         console.log('[CRON] Starting scheduled gold price scrape...');
-        const result = await scrapeAndSave();
-        console.log(`[CRON] Successfully scraped and saved price: ${result.data.price} ${result.data.unit}`);
+        const results = await Promise.allSettled([scrapeAndSave('ccb'), scrapeAndSave('cmb')]);
+        const successResults = results
+            .filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled')
+            .map((result) => result.value);
+        console.log('[CRON] Successfully scraped and saved prices:', successResults.length);
         return NextResponse.json({
             success: true,
-            data: result.data,
-            timestamp: result.timestamp
+            data: successResults.map((result) => result.data),
+            timestamp: new Date().toISOString()
         });
 
     } catch (error: any) {

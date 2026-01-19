@@ -13,7 +13,9 @@ const formatPrice = (price: number) =>
 
 export async function GET(request: NextRequest) {
     const sourceParam = request.nextUrl.searchParams.get('source');
+    const cacheOnlyParam = request.nextUrl.searchParams.get('cacheOnly');
     const source = sourceParam === 'cmb' ? 'cmb' : 'ccb';
+    const cacheOnly = cacheOnlyParam === '1';
     try {
         console.log('Starting scraper...');
 
@@ -23,7 +25,7 @@ export async function GET(request: NextRequest) {
         const latest = await getLatestGoldPrice(source);
         if (latest) {
             const diff = Date.now() - new Date(latest.timestamp).getTime();
-            if (diff < 10000) { // 10 seconds cache
+            if (cacheOnly || diff < 10000) { // 10 seconds cache
                 console.log('Returning cached data (< 10s old)');
                 return NextResponse.json({
                     success: true,
