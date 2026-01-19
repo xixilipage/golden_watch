@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Card,
   CardBody,
@@ -61,7 +61,31 @@ interface GoldHistoryResponse {
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export default function GoldDemoPage() {
-  const [selectedRange, setSelectedRange] = useState<string>('30');
+  // Initialize with '7' but try to read from localStorage on mount
+  const [selectedRange, setSelectedRange] = useState<string>('7');
+
+  useEffect(() => {
+    const savedRange = localStorage.getItem('gold_price_range');
+    if (savedRange && ['7', '30', '90', '365', 'all'].includes(savedRange)) {
+      setSelectedRange(savedRange);
+    }
+  }, []);
+
+  const handleRangeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (!value) return;
+
+    // 如果选择了新的范围，更新状态并记忆
+    if (value !== selectedRange) {
+      setSelectedRange(value);
+      localStorage.setItem('gold_price_range', value);
+      return;
+    }
+
+    // 如果再次选择同一个范围，则当作一次“刷新”操作
+    // 触发价格和历史数据的重新获取，并带有loading动画
+    handleRefresh();
+  };
   
   // Settings State
   const {isOpen, onOpen, onOpenChange} = useDisclosure();
@@ -85,6 +109,7 @@ export default function GoldDemoPage() {
   const { 
     data: historyData, 
     isLoading: isHistoryLoading,
+    isValidating: isHistoryValidating,
     mutate: mutateHistory
   } = useSWR<GoldHistoryResponse>(`/api/gold-history?days=${selectedRange}`, fetcher);
 
@@ -103,30 +128,95 @@ export default function GoldDemoPage() {
   };
 
   // Pull to refresh logic
+  const [pullProgress, setPullProgress] = useState(0);
+  const [isPulling, setIsPulling] = useState(false);
+  
+  // Use refs for gesture tracking to avoid effect re-runs
+  const startYRef = useRef(0);
+  const isPullingRef = useRef(false);
+  const pullProgressRef = useRef(0);
+  
+  // Keep latest handleRefresh in a ref to call it from event listeners without re-binding
+  const handleRefreshRef = useRef(handleRefresh);
   useEffect(() => {
-    let startY = 0;
+    handleRefreshRef.current = handleRefresh;
+  }, [handleRefresh]);
+
+  useEffect(() => {
+    const DEADZONE_THRESHOLD = 80; // Must drag 80px before activation (increased from 50)
+
     const handleTouchStart = (e: TouchEvent) => {
+      // Only enable pull to refresh when strictly at the top of the page
       if (window.scrollY === 0) {
-        startY = e.touches[0].clientY;
+        startYRef.current = e.touches[0].clientY;
+        // Reset state
+        isPullingRef.current = false;
+        pullProgressRef.current = 0;
       }
     };
 
-    const handleTouchEnd = async (e: TouchEvent) => {
-      if (window.scrollY === 0) {
-        const endY = e.changedTouches[0].clientY;
-        if (endY - startY > 150) { // Drag distance threshold
-           await handleRefresh();
+    const handleTouchMove = (e: TouchEvent) => {
+      // If we are not at top, ignore
+      if (window.scrollY > 0) {
+        if (isPullingRef.current) {
+            isPullingRef.current = false;
+            setIsPulling(false);
+            setPullProgress(0);
         }
+        return;
+      }
+
+      const currentY = e.touches[0].clientY;
+      const diff = currentY - startYRef.current;
+
+      // Only start pulling if:
+      // 1. We are dragging down (diff > DEADZONE_THRESHOLD)
+      // 2. We haven't started pulling yet
+      if (diff > DEADZONE_THRESHOLD && !isPullingRef.current) {
+         isPullingRef.current = true;
+         setIsPulling(true);
+      }
+
+      if (isPullingRef.current && diff > 0) {
+        // Prevent default browser refresh behavior
+        if (e.cancelable) {
+           e.preventDefault(); 
+        }
+        
+        // Add resistance
+        // (diff - DEADZONE_THRESHOLD) is the effective drag distance
+        // 0.4 is the resistance factor
+        const progress = Math.min((diff - DEADZONE_THRESHOLD) * 0.4, 200); 
+        pullProgressRef.current = progress;
+        setPullProgress(progress);
       }
     };
 
-    window.addEventListener('touchstart', handleTouchStart);
+    const handleTouchEnd = async () => {
+      if (!isPullingRef.current) return;
+
+      if (pullProgressRef.current > 80) { // Trigger refresh if pulled enough (increased from 60)
+        await handleRefreshRef.current();
+      }
+      
+      // Reset
+      isPullingRef.current = false;
+      pullProgressRef.current = 0;
+      setIsPulling(false);
+      setPullProgress(0);
+    };
+
+    // Add passive: false to allow preventDefault
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
     window.addEventListener('touchend', handleTouchEnd);
+    
     return () => {
       window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [selectedRange]);
+  }, []); // No dependencies = stable listeners
 
   const chartData = useMemo(() => {
     if (!historyData?.data) return [];
@@ -211,7 +301,32 @@ export default function GoldDemoPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-3 md:p-8 font-sans">
-      <div className="max-w-7xl mx-auto space-y-3 md:space-y-6">
+      
+      {/* Pull to refresh indicator */}
+      <div 
+        className="fixed top-0 left-0 w-full flex justify-center pointer-events-none transition-transform duration-200 z-50"
+        style={{ transform: `translateY(${pullProgress > 0 ? pullProgress + 10 : -50}px)` }}
+      >
+        <div className="bg-white dark:bg-gray-800 rounded-full p-2 shadow-lg border border-gray-100 dark:border-gray-700 flex items-center gap-2">
+          {isRefreshing ? (
+             <Spinner size="sm" />
+          ) : (
+             <RefreshCw 
+               size={20} 
+               className={`text-primary transition-transform duration-300 ${pullProgress > 80 ? 'rotate-180' : ''}`} 
+               style={{ opacity: Math.min(pullProgress / 50, 1) }}
+             />
+          )}
+          {pullProgress > 80 && !isRefreshing && <span className="text-xs font-medium text-gray-500">松开刷新</span>}
+          {isRefreshing && <span className="text-xs font-medium text-gray-500">更新中...</span>}
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto space-y-3 md:space-y-6" 
+           style={{ 
+             transform: `translateY(${pullProgress > 0 ? pullProgress * 0.3 : 0}px)`,
+             transition: isPulling ? 'none' : 'transform 0.3s ease-out' 
+           }}>
         
         {/* Header Section */}
         <div className="flex justify-between items-center px-1">
@@ -290,9 +405,10 @@ export default function GoldDemoPage() {
                    <Select 
                       className="max-w-[130px]" 
                       size="sm" 
-                      defaultSelectedKeys={[selectedRange]}
-                      onChange={(e) => setSelectedRange(e.target.value)}
+                      selectedKeys={[selectedRange]}
+                      onChange={handleRangeChange}
                       aria-label="Select time range"
+                      disallowEmptySelection
                     >
                       {timeRanges.map((range) => (
                         <SelectItem key={range.key}>
@@ -303,7 +419,7 @@ export default function GoldDemoPage() {
                 </div>
               </CardHeader>
               <CardBody className="py-3 px-3 md:py-4 md:px-4">
-                {stats && !isRefreshing ? (
+                {stats && !isRefreshing && !isHistoryValidating ? (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
                     <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg flex flex-col items-center justify-center">
                       <p className="text-xs text-gray-500 mb-1">最高价</p>
@@ -346,7 +462,7 @@ export default function GoldDemoPage() {
                 </div>
               </CardHeader>
               <CardBody className="px-2 pb-4">
-                {isHistoryLoading || isRefreshing ? (
+                {isHistoryLoading || isHistoryValidating || isRefreshing ? (
                   <div className="h-full flex items-center justify-center">
                     <Spinner label="加载历史数据..." color="primary" />
                   </div>
